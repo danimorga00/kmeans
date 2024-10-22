@@ -2,6 +2,8 @@
 #include <cstdio>
 #include <chrono>
 #include <iostream>
+#include <vector>
+#include <fstream>
 
 #define TPB 512
 #define MAX_ITER 5
@@ -78,7 +80,7 @@ __global__ void finalizeCentroids(int *d_centroids, int *d_clust_sizes, int K) {
         }
     }
 }
-int firstExperiment(int N, int K)
+float firstExperiment(int N, int K)
 {
 
 	//allocate memory on the device for the data points
@@ -127,29 +129,19 @@ int firstExperiment(int N, int K)
 
 	while(cur_iter < MAX_ITER)
 	{
-		//call cluster assignment kernel
 		kMeansClusterAssignment<<<(N+TPB-1)/TPB,TPB>>>(d_datapoints,d_clust_assn,d_centroids, N, K);
 
-		//copy new centroids back to host
 		cudaMemcpy(h_centroids,d_centroids,K*sizeof(int),cudaMemcpyDeviceToHost);
 		cudaMemcpy(h_clust_sizes,d_clust_sizes,K*sizeof(int),cudaMemcpyDeviceToHost);
 		cudaMemcpy(h_clust_assn,d_clust_assn,N*sizeof(int),cudaMemcpyDeviceToHost);
 
-		//printf("Iteration %d: point 1000: %f --> %d\n",cur_iter,h_datapoints[0],h_clust_assn[0]);
-		//reset centroids and cluster sizes (will be updated in the next kernel)
 		resetCentroids<<<(N+TPB-1)/TPB,TPB>>>(d_centroids, d_clust_sizes,  K);
 
-		//call centroid update kernel
 		accumulateCentroid<<<(N+TPB-1)/TPB,TPB>>>(d_datapoints,d_clust_assn,d_centroids,d_clust_sizes, N, K);
 
 		cudaDeviceSynchronize();
 
-		// Kernel per dividere i centroidi
-		int blocksPerGrid = (K + TPB - 1) / TPB;
-		finalizeCentroids<<<blocksPerGrid, TPB>>>(d_centroids, d_clust_sizes, K);
-		for(int i =0; i < K; ++i){
-			//printf("Iteration %d: centroid %d: %d, cluster size: %d\n",cur_iter,i,h_centroids[i], h_clust_sizes[i]);
-		}
+		finalizeCentroids<<<(K + TPB - 1) / TPB, TPB>>>(d_centroids, d_clust_sizes, K);
 
 		cur_iter+=1;
 	}
@@ -172,14 +164,55 @@ int firstExperiment(int N, int K)
 	free(h_datapoints);
 	free(h_clust_sizes);
 
-	return 0;
+	return ((float)duration.count())/1000;
+}
+
+typedef struct {
+	float time;
+	int numPoints;
+	int numClusters;
+	int tpb;
+}ExperimentResult;
+
+// Funzione per scrivere il vettore di struct in un file CSV
+void writeToCSV(const std::vector<ExperimentResult>& results, const std::string& filename) {
+	// Apri il file in modalità scrittura
+	std::ofstream file;
+	file.open (filename);
+	// Controlla se il file è aperto correttamente
+	if (!file.is_open()) {
+		std::cerr << "Errore nell'aprire il file!" << std::endl;
+		return;
+	}
+
+	// Scrivi l'intestazione del CSV (opzionale)
+	file << "T_seq,T_par,querySize\n";
+
+	// Itera attraverso la lista di risultati e scrivi ogni struct nel CSV
+	for (const auto& result : results) {
+		file << result.numPoints << "," << result.numClusters << "," << result.tpb << "," << result.time << "\n";
+	}
+
+	// Chiudi il file
+	file.close();
+
+	std::cout << "File CSV scritto correttamente." << std::endl;
 }
 
 int main(){
-	int it = 4;
+	int it = 10;
 	int j=0;
+
+	std::vector<ExperimentResult> results;
+	ExperimentResult result = {0};
+
 	for(int i=0;i<it; i++){
 		j=pow(2,i);
-  		firstExperiment(10000000*j, 3);
+  		result.time = firstExperiment(500000*j, 10);
+  		result.numPoints = 500000*j;
+  		result.numClusters = 10;
+  		result.tpb = TPB;
+        results.push_back(result);
   	}
+    writeToCSV(results, "exp1.csv");     //FIXME non crea il file
 }
