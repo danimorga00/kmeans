@@ -186,7 +186,7 @@ void writeToCSV(const std::vector<ExperimentResult>& results, const std::string&
 	}
 
 	// Scrivi l'intestazione del CSV (opzionale)
-	file << "T_seq,T_par,querySize\n";
+	file << "numPoints,numClusters,tpb, time\n";
 
 	// Itera attraverso la lista di risultati e scrivi ogni struct nel CSV
 	for (const auto& result : results) {
