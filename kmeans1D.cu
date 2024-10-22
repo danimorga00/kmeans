@@ -3,7 +3,7 @@
 #include <chrono>
 #include <iostream>
 
-#define TPB 64
+#define TPB 512
 #define MAX_ITER 5
 
 __device__ float distance(float x1, float x2)
@@ -11,7 +11,7 @@ __device__ float distance(float x1, float x2)
 	return sqrt((x2-x1)*(x2-x1));
 }
 
-__global__ void kMeansClusterAssignment(float *d_datapoints, int *d_clust_assn, float *d_centroids, int N, int K)
+__global__ void kMeansClusterAssignment(int *d_datapoints, int *d_clust_assn, int *d_centroids, int N, int K)
 {
 	//get idx for this datapoint
 	const int idx = blockIdx.x*blockDim.x + threadIdx.x;
@@ -38,79 +38,65 @@ __global__ void kMeansClusterAssignment(float *d_datapoints, int *d_clust_assn, 
 	d_clust_assn[idx]=closest_centroid;
 	__syncthreads();
 }
+__global__ void accumulateCentroid(int *d_datapoints, int *d_clust_assn,
+                                     int *d_centroids, int *d_clust_sizes, int N, int K) {
+    // Indice globale del thread
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
+    // Controlliamo che il thread stia lavorando su un dato valido
+    if (tid < N) {
+        // Ottieni il punto corrente
+        int point = d_datapoints[tid];
 
-__global__ void kMeansCentroidUpdate(float *d_datapoints, int *d_clust_assn, float *d_centroids, int *d_clust_sizes, int N, int K)
-{
+        // Ottieni l'ID del centroide a cui è stato assegnato questo punto
+        int clusterId = d_clust_assn[tid];
 
-	//get idx of thread at grid level
-	const int idx = blockIdx.x*blockDim.x + threadIdx.x;
-
-	//bounds check
-	if (idx >= N) return;
-
-	//get idx of thread at the block level
-	const int s_idx = threadIdx.x;
-
-	//put the datapoints and corresponding cluster assignments in shared memory so that they can be summed by thread 0 later
-	__shared__ float s_datapoints[TPB];
-	s_datapoints[s_idx]= d_datapoints[idx];
-
-	__shared__ int s_clust_assn[TPB];
-	s_clust_assn[s_idx] = d_clust_assn[idx];
-
-	__syncthreads();
-
-	//it is the thread with idx 0 (in each block) that sums up all the values within the shared array for the block it is in
-	if(s_idx==0)
-	{
-		float* b_clust_datapoint_sums=(float*)malloc(K*sizeof(float));
-		int* b_clust_sizes=(int*)malloc(K*sizeof(float));
-
-		for(int j=0; j< blockDim.x; j++)
-		{
-			int clust_id = s_clust_assn[j];
-			b_clust_datapoint_sums[clust_id]+=s_datapoints[j];
-			b_clust_sizes[clust_id]+=1;
-		}
-
-		//Now we add the sums to the global centroids and add the counts to the global counts.
-		for(int z=0; z < K; z++)
-		{
-			atomicAdd(&d_centroids[z],b_clust_datapoint_sums[z]);
-			atomicAdd(&d_clust_sizes[z],b_clust_sizes[z]);
-		}
-	}
-
-	__syncthreads();
-
-	//currently centroids are just sums, so divide by size to get actual centroids
-	if(idx < K){
-		d_centroids[idx] = d_centroids[idx]/d_clust_sizes[idx];
-	}
-	__syncthreads();
+        // Aggiorna il centroide corrispondente e il numero di punti associati (in modo atomico)
+        atomicAdd(&(d_centroids[clusterId]), point);
+        atomicAdd(&(d_clust_sizes[clusterId]), 1);
+    }
 }
 
+__global__ void resetCentroids(int *d_centroids, int *d_clust_sizes, int K) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < K) {
+        d_centroids[idx] = 0.0f;
+        d_clust_sizes[idx] = 0;
+    }
+}
+__global__ void finalizeCentroids(int *d_centroids, int *d_clust_sizes, int K) {
+    // Indice del thread
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
+    if (tid < K) {
+        // Evita la divisione per zero
+        if (d_clust_sizes[tid] > 0) {
+            d_centroids[tid] /= d_clust_sizes[tid];
+        } else {
+            // In caso di cluster vuoto, si può lasciare il centroide invariato
+            // oppure gestire il caso in altro modo (es: randomizzare il centroide)
+        }
+    }
+}
 int firstExperiment(int N, int K)
 {
 
 	//allocate memory on the device for the data points
-	float *d_datapoints=0;
+	int *d_datapoints=0;
 	//allocate memory on the device for the cluster assignments
 	int *d_clust_assn = 0;
 	//allocate memory on the device for the cluster centroids
-	float *d_centroids = 0;
+	int *d_centroids = 0;
 	//allocate memory on the device for the cluster sizes
 	int *d_clust_sizes=0;
 
-	cudaMalloc(&d_datapoints, N*sizeof(float));
+	cudaMalloc(&d_datapoints, N*sizeof(int));
 	cudaMalloc(&d_clust_assn,N*sizeof(int));
-	cudaMalloc(&d_centroids,K*sizeof(float));
-	cudaMalloc(&d_clust_sizes,K*sizeof(float));
+	cudaMalloc(&d_centroids,K*sizeof(int));
+	cudaMalloc(&d_clust_sizes,K*sizeof(int));
 
-	float *h_centroids = (float*)malloc(K*sizeof(float));
-	float *h_datapoints = (float*)malloc(N*sizeof(float));
+	int *h_centroids = (int*)malloc(K*sizeof(int));
+	int *h_datapoints = (int*)malloc(N*sizeof(int));
 	int *h_clust_assn = (int*)malloc(N*sizeof(int));
 	int *h_clust_sizes = (int*)malloc(K*sizeof(int));
 
@@ -119,7 +105,7 @@ int firstExperiment(int N, int K)
 	//initialize centroids
 	for(int c=0;c<K;++c)
 	{
-		h_centroids[c]=(float) rand() / (double)RAND_MAX;
+		h_centroids[c]= rand() % 1000;
     std::cout << "{" << h_centroids[c]  << "}" << std::endl;
 		h_clust_sizes[c]=0;
 	}
@@ -127,15 +113,15 @@ int firstExperiment(int N, int K)
 	//initalize datapoints
 	for(int d = 0; d < N; ++d)
 	{
-		h_datapoints[d] = (float) rand() / (double)RAND_MAX;
+		h_datapoints[d] = rand() % 1000;
     //std::cout << "{" << h_datapoints[d]  << "}" << std::endl;
 	}
 
-	cudaMemcpy(d_centroids,h_centroids,K*sizeof(float),cudaMemcpyHostToDevice);
-	cudaMemcpy(d_datapoints,h_datapoints,N*sizeof(float),cudaMemcpyHostToDevice);
+	cudaMemcpy(d_centroids,h_centroids,K*sizeof(int),cudaMemcpyHostToDevice);
+	cudaMemcpy(d_datapoints,h_datapoints,N*sizeof(int),cudaMemcpyHostToDevice);
 	cudaMemcpy(d_clust_sizes,h_clust_sizes,K*sizeof(int),cudaMemcpyHostToDevice);
 
-	int cur_iter = 1;
+	int cur_iter = 0;
 
 	auto start = std::chrono::high_resolution_clock::now();
 
@@ -145,30 +131,34 @@ int firstExperiment(int N, int K)
 		kMeansClusterAssignment<<<(N+TPB-1)/TPB,TPB>>>(d_datapoints,d_clust_assn,d_centroids, N, K);
 
 		//copy new centroids back to host
-		cudaMemcpy(h_centroids,d_centroids,K*sizeof(float),cudaMemcpyDeviceToHost);
+		cudaMemcpy(h_centroids,d_centroids,K*sizeof(int),cudaMemcpyDeviceToHost);
 		cudaMemcpy(h_clust_sizes,d_clust_sizes,K*sizeof(int),cudaMemcpyDeviceToHost);
-
 		cudaMemcpy(h_clust_assn,d_clust_assn,N*sizeof(int),cudaMemcpyDeviceToHost);
-		printf("Iteration %d: point 0: %f --> %d\n",cur_iter,h_datapoints[0],h_clust_assn[0]);
 
+		//printf("Iteration %d: point 1000: %f --> %d\n",cur_iter,h_datapoints[0],h_clust_assn[0]);
 		//reset centroids and cluster sizes (will be updated in the next kernel)
-		cudaMemset(d_centroids,0.0,K*sizeof(float));
-		cudaMemset(d_clust_sizes,0,K*sizeof(int));
+		resetCentroids<<<(N+TPB-1)/TPB,TPB>>>(d_centroids, d_clust_sizes,  K);
 
 		//call centroid update kernel
-		kMeansCentroidUpdate<<<(N+TPB-1)/TPB,TPB>>>(d_datapoints,d_clust_assn,d_centroids,d_clust_sizes, N, K);
+		accumulateCentroid<<<(N+TPB-1)/TPB,TPB>>>(d_datapoints,d_clust_assn,d_centroids,d_clust_sizes, N, K);
 
+		cudaDeviceSynchronize();
+
+		// Kernel per dividere i centroidi
+		int blocksPerGrid = (K + TPB - 1) / TPB;
+		finalizeCentroids<<<blocksPerGrid, TPB>>>(d_centroids, d_clust_sizes, K);
 		for(int i =0; i < K; ++i){
-			printf("Iteration %d: centroid %d: %f, cluster size: %d\n",cur_iter,i,h_centroids[i], h_clust_sizes[i]);
+			printf("Iteration %d: centroid %d: %d, cluster size: %d\n",cur_iter,i,h_centroids[i], h_clust_sizes[i]);
 		}
 
 		cur_iter+=1;
 	}
 
-	for(int c=0;c<K;++c)
+	for(int c=0;c<N;++c)
 	{
     //std::cout << "{" << h_centroids[c]  << "}" << std::endl;
 	}
+	cudaDeviceSynchronize();
 	auto end = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
   std::cout << "Tempo di esecuzione: " << ((float)duration.count())/1000 << " millisecondi" << std::endl;
@@ -186,5 +176,5 @@ int firstExperiment(int N, int K)
 }
 
 int main(){
-  firstExperiment(100000, 3);
+  firstExperiment(10000000, 3);
 }
