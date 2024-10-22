@@ -6,7 +6,7 @@
 #include <fstream>
 
 #define TPB 512
-#define MAX_ITER 5
+#define MAX_ITER 50
 
 __device__ float distance(float x1, float x2)
 {
@@ -208,8 +208,8 @@ int main(){
 
 	for(int i=0;i<it; i++){
 		j=pow(2,i);
-  		result.time = firstExperiment(500000*j, 10);
-  		result.numPoints = 500000*j;
+  		result.time = firstExperiment(50000*j, 10);
+  		result.numPoints = 50000*j;
   		result.numClusters = 10;
   		result.tpb = TPB;
         results.push_back(result);
