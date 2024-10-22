@@ -106,7 +106,7 @@ int firstExperiment(int N, int K)
 	for(int c=0;c<K;++c)
 	{
 		h_centroids[c]= rand() % 1000;
-    std::cout << "{" << h_centroids[c]  << "}" << std::endl;
+    	//std::cout << "{" << h_centroids[c]  << "}" << std::endl;
 		h_clust_sizes[c]=0;
 	}
 
@@ -148,7 +148,7 @@ int firstExperiment(int N, int K)
 		int blocksPerGrid = (K + TPB - 1) / TPB;
 		finalizeCentroids<<<blocksPerGrid, TPB>>>(d_centroids, d_clust_sizes, K);
 		for(int i =0; i < K; ++i){
-			printf("Iteration %d: centroid %d: %d, cluster size: %d\n",cur_iter,i,h_centroids[i], h_clust_sizes[i]);
+			//printf("Iteration %d: centroid %d: %d, cluster size: %d\n",cur_iter,i,h_centroids[i], h_clust_sizes[i]);
 		}
 
 		cur_iter+=1;
@@ -161,7 +161,7 @@ int firstExperiment(int N, int K)
 	cudaDeviceSynchronize();
 	auto end = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-  std::cout << "Tempo di esecuzione: " << ((float)duration.count())/1000 << " millisecondi" << std::endl;
+  	std::cout << "Tempo di esecuzione: " << ((float)duration.count())/1000 << " millisecondi" << std::endl;
 
 	cudaFree(d_datapoints);
 	cudaFree(d_clust_assn);
@@ -176,5 +176,10 @@ int firstExperiment(int N, int K)
 }
 
 int main(){
-  firstExperiment(10000000, 3);
+	int it = 4;
+	int j=0;
+	for(int i=0;i<it; i++){
+		j=pow(2,i);
+  		firstExperiment(10000000*j, 3);
+  	}
 }
