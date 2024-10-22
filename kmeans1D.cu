@@ -208,11 +208,11 @@ int main(){
 
 	for(int i=0;i<it; i++){
 		j=pow(2,i);
-  		result.time = firstExperiment(50000*j, 10);
-  		result.numPoints = 50000*j;
-  		result.numClusters = 10;
+  		result.time = firstExperiment(500000, 10*j);
+  		result.numPoints = 500000;
+  		result.numClusters = 10*j;
   		result.tpb = TPB;
         results.push_back(result);
   	}
-    writeToCSV(results, "exp1.csv");     //FIXME non crea il file
+    writeToCSV(results, "exp2_par.csv");     //FIXME non crea il file
 }
