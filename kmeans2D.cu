@@ -2,18 +2,23 @@
 #include <cstdio>
 #include <chrono>
 #include <iostream>
+#include <vector>
+#include <fstream>
+#include <math.h>
+#include <cuda_runtime.h>
+
 
 #define TPB 256
 #define MAX_ITER 100
 
 // Struttura per un punto in 2D
-struct Point {
-    float x, y;
-};
+typedef struct {
+    int x, y;
+}Point;
 
 // Funzione per calcolare la distanza euclidea tra due punti
 __device__ float distance(Point a, Point b) {
-    return sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+    return sqrtf((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
 }
 
 __global__ void kMeansClusterAssignment(Point *d_datapoints, int *d_clust_assn, Point *d_centroids, int N, int K)
@@ -28,7 +33,7 @@ __global__ void kMeansClusterAssignment(Point *d_datapoints, int *d_clust_assn, 
 	float min_dist = INFINITY;
 	int closest_centroid = 0;
 
-	for(int c = 0; c<K;++c)
+	for(int c = 0; c<K;c++)
 	{
 		float dist = distance(d_datapoints[idx],d_centroids[c]);
 
@@ -41,83 +46,71 @@ __global__ void kMeansClusterAssignment(Point *d_datapoints, int *d_clust_assn, 
 
 	//assign closest cluster id for this datapoint/thread
 	d_clust_assn[idx]=closest_centroid;
+	__syncthreads();
+}
+__global__ void accumulateCentroid(Point *d_datapoints, int *d_clust_assn,
+                                     Point *d_centroids, int *d_clust_sizes, int N, int K) {
+    // Indice globale del thread
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // Controlliamo che il thread stia lavorando su un dato valido
+    if (tid < N) {
+        // Ottieni il punto corrente
+        Point point = d_datapoints[tid];
+
+        // Ottieni l'ID del centroide a cui è stato assegnato questo punto
+        int clusterId = d_clust_assn[tid];
+
+        // Aggiorna il centroide corrispondente e il numero di punti associati (in modo atomico)
+        atomicAdd(&(d_centroids[clusterId].x), point.x);
+        atomicAdd(&(d_centroids[clusterId].y), point.y);
+        atomicAdd(&(d_clust_sizes[clusterId]), 1);
+    }
 }
 
-
-__global__ void kMeansCentroidUpdate(Point *d_datapoints, int *d_clust_assn, Point *d_centroids, int *d_clust_sizes, int N, int K)
-{
-
-	//get idx of thread at grid level
-	const int idx = blockIdx.x*blockDim.x + threadIdx.x;
-
-	//bounds check
-	if (idx >= N) return;
-
-	//get idx of thread at the block level
-	const int s_idx = threadIdx.x;
-
-	//put the datapoints and corresponding cluster assignments in shared memory so that they can be summed by thread 0 later
-	__shared__ Point s_datapoints[TPB];
-	s_datapoints[s_idx]= d_datapoints[idx];
-
-	__shared__ int s_clust_assn[TPB];
-	s_clust_assn[s_idx] = d_clust_assn[idx];
-
-	__syncthreads();
-
-	//it is the thread with idx 0 (in each block) that sums up all the values within the shared array for the block it is in
-	if(s_idx==0)
-	{
-		Point* b_clust_datapoint_sums=(Point*)malloc(K*sizeof(Point));
-		int* b_clust_sizes=(int*)malloc(K*sizeof(float));
-
-		for(int j=0; j< blockDim.x; ++j)
-		{
-			int clust_id = s_clust_assn[j];
-			b_clust_datapoint_sums[clust_id].x+=s_datapoints[j].x;
-			b_clust_datapoint_sums[clust_id].y+=s_datapoints[j].y;
-			b_clust_sizes[clust_id]+=1;
-		}
-
-		//Now we add the sums to the global centroids and add the counts to the global counts.
-		for(int z=0; z < K; ++z)
-		{
-			atomicAdd(&d_centroids[z].x,b_clust_datapoint_sums[z].x);
-			atomicAdd(&d_centroids[z].y,b_clust_datapoint_sums[z].y);
-			atomicAdd(&d_clust_sizes[z],b_clust_sizes[z]);
-		}
-	}
-
-	__syncthreads();
-
-	//currently centroids are just sums, so divide by size to get actual centroids
-	if(idx < K){
-		d_centroids[idx].x = d_centroids[idx].x/d_clust_sizes[idx];
-		d_centroids[idx].y = d_centroids[idx].y/d_clust_sizes[idx];
-	}
-
+__global__ void resetCentroids(Point *d_centroids, int *d_clust_sizes, int K) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < K) {
+        d_centroids[idx].x = 0;
+        d_centroids[idx].y = 0;
+        d_clust_sizes[idx] = 0;
+    }
 }
+__global__ void finalizeCentroids(Point *d_centroids, int *d_clust_sizes, int K) {
+    // Indice del thread
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
-
-int firstExperiment(int N, int K)
+    if (tid < K) {
+        // Evita la divisione per zero
+        if (d_clust_sizes[tid] > 0) {
+            d_centroids[tid].x /= d_clust_sizes[tid];
+            d_centroids[tid].y /= d_clust_sizes[tid];
+        } else {
+            // In caso di cluster vuoto, si può lasciare il centroide invariato
+            // oppure gestire il caso in altro modo (es: randomizzare il centroide)
+        }
+    }
+}
+float firstExperiment(int N, int K)
 {
 
 	//allocate memory on the device for the data points
-	Point *d_datapoints=0;
+	Point *d_datapoints;
 	//allocate memory on the device for the cluster assignments
 	int *d_clust_assn = 0;
 	//allocate memory on the device for the cluster centroids
-	Point *d_centroids = 0;
+	Point *d_centroids;
 	//allocate memory on the device for the cluster sizes
 	int *d_clust_sizes=0;
 
 	cudaMalloc(&d_datapoints, N*sizeof(Point));
 	cudaMalloc(&d_clust_assn,N*sizeof(int));
 	cudaMalloc(&d_centroids,K*sizeof(Point));
-	cudaMalloc(&d_clust_sizes,K*sizeof(float));
+	cudaMalloc(&d_clust_sizes,K*sizeof(int));
 
 	Point *h_centroids = (Point*)malloc(K*sizeof(Point));
 	Point *h_datapoints = (Point*)malloc(N*sizeof(Point));
+	int *h_clust_assn = (int*)malloc(N*sizeof(int));
 	int *h_clust_sizes = (int*)malloc(K*sizeof(int));
 
 	srand(time(0));
@@ -125,51 +118,55 @@ int firstExperiment(int N, int K)
 	//initialize centroids
 	for(int c=0;c<K;++c)
 	{
-		h_centroids[c].x=(float) rand() / (double)RAND_MAX;
-		h_centroids[c].y=(float) rand() / (double)RAND_MAX;
+		h_centroids[c].x = rand() % 1000;
+		h_centroids[c].y = rand() % 1000;
+    	//std::cout << "{" << h_centroids[c]  << "}" << std::endl;
 		h_clust_sizes[c]=0;
 	}
 
 	//initalize datapoints
 	for(int d = 0; d < N; ++d)
 	{
-		h_datapoints[d].x = (float) rand() / (double)RAND_MAX;
-		h_datapoints[d].y = (float) rand() / (double)RAND_MAX;
+		h_datapoints[d].x = rand() % 1000;
+		h_datapoints[d].y = rand() % 1000;
+    //std::cout << "{" << h_datapoints[d]  << "}" << std::endl;
 	}
 
 	cudaMemcpy(d_centroids,h_centroids,K*sizeof(Point),cudaMemcpyHostToDevice);
 	cudaMemcpy(d_datapoints,h_datapoints,N*sizeof(Point),cudaMemcpyHostToDevice);
 	cudaMemcpy(d_clust_sizes,h_clust_sizes,K*sizeof(int),cudaMemcpyHostToDevice);
 
-	int cur_iter = 1;
+	int cur_iter = 0;
 
 	auto start = std::chrono::high_resolution_clock::now();
 
 	while(cur_iter < MAX_ITER)
 	{
-		//call cluster assignment kernel
 		kMeansClusterAssignment<<<(N+TPB-1)/TPB,TPB>>>(d_datapoints,d_clust_assn,d_centroids, N, K);
 
-		//copy new centroids back to host
-		cudaMemcpy(h_centroids,d_centroids,K*sizeof(float),cudaMemcpyDeviceToHost);
+		cudaMemcpy(h_centroids,d_centroids,K*sizeof(Point),cudaMemcpyDeviceToHost);
+		cudaMemcpy(h_clust_sizes,d_clust_sizes,K*sizeof(int),cudaMemcpyDeviceToHost);
+		cudaMemcpy(h_clust_assn,d_clust_assn,N*sizeof(int),cudaMemcpyDeviceToHost);
 
-		for(int i =0; i < K; ++i){
-			//Uprintf("Iteration %d: centroid %d: %f\n",cur_iter,i,h_centroids[i]);
-		}
+		resetCentroids<<<(N+TPB-1)/TPB,TPB>>>(d_centroids, d_clust_sizes,  K);
 
-		//reset centroids and cluster sizes (will be updated in the next kernel)
-		cudaMemset(d_centroids,0.0,K*sizeof(Point));
-		cudaMemset(d_clust_sizes,0,K*sizeof(int));
+		accumulateCentroid<<<(N+TPB-1)/TPB,TPB>>>(d_datapoints,d_clust_assn,d_centroids,d_clust_sizes, N, K);
 
-		//call centroid update kernel
-		kMeansCentroidUpdate<<<(N+TPB-1)/TPB,TPB>>>(d_datapoints,d_clust_assn,d_centroids,d_clust_sizes, N, K);
+		cudaDeviceSynchronize();
+
+		finalizeCentroids<<<(K + TPB - 1) / TPB, TPB>>>(d_centroids, d_clust_sizes, K);
 
 		cur_iter+=1;
 	}
 
+	for(int c=0;c<N;++c)
+	{
+    //std::cout << "{" << h_centroids[c]  << "}" << std::endl;
+	}
+	cudaDeviceSynchronize();
 	auto end = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-  std::cout << "Tempo di esecuzione: " << ((float)duration.count())/1000 << " millisecondi" << std::endl;
+  	std::cout << "Tempo di esecuzione: " << ((float)duration.count())/1000 << " millisecondi" << std::endl;
 
 	cudaFree(d_datapoints);
 	cudaFree(d_clust_assn);
@@ -180,9 +177,65 @@ int firstExperiment(int N, int K)
 	free(h_datapoints);
 	free(h_clust_sizes);
 
-	return 0;
+	return ((float)duration.count())/1000;
+}
+
+typedef struct {
+	float time;
+	int numPoints;
+	int numClusters;
+	int tpb;
+}ExperimentResult;
+
+// Funzione per scrivere il vettore di struct in un file CSV
+void writeToCSV(const std::vector<ExperimentResult>& results, const std::string& filename) {
+	// Apri il file in modalità scrittura
+	std::ofstream file;
+	file.open (filename);
+	// Controlla se il file è aperto correttamente
+	if (!file.is_open()) {
+		std::cerr << "Errore nell'aprire il file!" << std::endl;
+		return;
+	}
+
+	// Scrivi l'intestazione del CSV (opzionale)
+	file << "numPoints,numClusters,tpb, time\n";
+
+	// Itera attraverso la lista di risultati e scrivi ogni struct nel CSV
+	for (const auto& result : results) {
+		file << result.numPoints << "," << result.numClusters << "," << result.tpb << "," << result.time << "\n";
+	}
+
+	// Chiudi il file
+	file.close();
+
+	std::cout << "File CSV scritto correttamente." << std::endl;
 }
 
 int main(){
-  firstExperiment(10000000, 100);
+	int it = 10;
+	int j=0;
+
+	std::vector<ExperimentResult> results;
+	ExperimentResult result = {0};
+
+	for(int i=0;i<it; i++){
+		j=pow(2,i);
+  		result.time = firstExperiment(500000, 10*j);
+  		result.numPoints = 500000;
+  		result.numClusters = 10*j;
+  		result.tpb = TPB;
+        results.push_back(result);
+  	}
+    writeToCSV(results, "exp2_2D_par.csv");     //FIXME non crea il file
+
+	for(int i=0;i<it; i++){
+		j=pow(2,i);
+  		result.time = firstExperiment(500000*j, 10);
+  		result.numPoints = 500000*j;
+  		result.numClusters = 10;
+  		result.tpb = TPB;
+        results.push_back(result);
+  	}
+    writeToCSV(results, "exp1_2D_par.csv");     //FIXME non crea il file
 }
