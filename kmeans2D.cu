@@ -240,7 +240,7 @@ std::vector<ExperimentResult> secondExperiment(){
 }
 
 std::vector<ExperimentResult> thirdExperiment(){
-	int it = 5;
+	int it = 6;
 	int j=0;
 	std::vector<ExperimentResult> results;
 	ExperimentResult result = {0};
