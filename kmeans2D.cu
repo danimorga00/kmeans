@@ -247,9 +247,9 @@ std::vector<ExperimentResult> thirdExperiment(){
 
 	for(int i=0;i<it; i++){
 		j=pow(2,i);
-  		result.time = kmeans(1000000, 10, 32*j);
-  		result.numPoints = 1000000;
-  		result.numClusters = 10;
+  		result.time = kmeans(5000000, 100, 32*j);
+  		result.numPoints = 5000000;
+  		result.numClusters = 100;
   		result.tpb = 32*j;
         results.push_back(result);
   	}
