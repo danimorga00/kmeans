@@ -221,8 +221,8 @@ int main(){
 
 	for(int i=0;i<it; i++){
 		j=pow(2,i);
-  		result.time = firstExperiment(500000, 10*j);
-  		result.numPoints = 500000;
+  		result.time = firstExperiment(50000, 10*j);
+  		result.numPoints = 50000;
   		result.numClusters = 10*j;
   		result.tpb = TPB;
         results.push_back(result);
@@ -231,8 +231,8 @@ int main(){
 
 	for(int i=0;i<it; i++){
 		j=pow(2,i);
-  		result.time = firstExperiment(500000*j, 10);
-  		result.numPoints = 500000*j;
+  		result.time = firstExperiment(50000*j, 10);
+  		result.numPoints = 50000*j;
   		result.numClusters = 10;
   		result.tpb = TPB;
         results.push_back(result);
