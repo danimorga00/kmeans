@@ -91,7 +91,7 @@ __global__ void finalizeCentroids(Point *d_centroids, int *d_clust_sizes, int K)
         }
     }
 }
-float firstExperiment(int N, int K)
+float kmeans(int N, int K, int tpb)
 {
 
 	//allocate memory on the device for the data points
@@ -142,19 +142,12 @@ float firstExperiment(int N, int K)
 
 	while(cur_iter < MAX_ITER)
 	{
-		kMeansClusterAssignment<<<(N+TPB-1)/TPB,TPB>>>(d_datapoints,d_clust_assn,d_centroids, N, K);
+		kMeansClusterAssignment<<<(N+tpb-1)/tpb,tpb>>>(d_datapoints,d_clust_assn,d_centroids, N, K);
 
-		cudaMemcpy(h_centroids,d_centroids,K*sizeof(Point),cudaMemcpyDeviceToHost);
-		cudaMemcpy(h_clust_sizes,d_clust_sizes,K*sizeof(int),cudaMemcpyDeviceToHost);
-		cudaMemcpy(h_clust_assn,d_clust_assn,N*sizeof(int),cudaMemcpyDeviceToHost);
-
-		resetCentroids<<<(N+TPB-1)/TPB,TPB>>>(d_centroids, d_clust_sizes,  K);
-
-		accumulateCentroid<<<(N+TPB-1)/TPB,TPB>>>(d_datapoints,d_clust_assn,d_centroids,d_clust_sizes, N, K);
-
+		resetCentroids<<<(N+tpb-1)/tpb,tpb>>>(d_centroids, d_clust_sizes,  K);
+		accumulateCentroid<<<(N+tpb-1)/tpb,tpb>>>(d_datapoints,d_clust_assn,d_centroids,d_clust_sizes, N, K);
 		cudaDeviceSynchronize();
-
-		finalizeCentroids<<<(K + TPB - 1) / TPB, TPB>>>(d_centroids, d_clust_sizes, K);
+		finalizeCentroids<<<(K + tpb - 1) / tpb, tpb>>>(d_centroids, d_clust_sizes, K);
 
 		cur_iter+=1;
 	}
@@ -212,30 +205,66 @@ void writeToCSV(const std::vector<ExperimentResult>& results, const std::string&
 	std::cout << "File CSV scritto correttamente." << std::endl;
 }
 
-int main(){
+std::vector<ExperimentResult> firstExperiment(){
 	int it = 10;
 	int j=0;
-
 	std::vector<ExperimentResult> results;
 	ExperimentResult result = {0};
 
 	for(int i=0;i<it; i++){
 		j=pow(2,i);
-  		result.time = firstExperiment(50000, 10*j);
+  		result.time = kmeans(50000, 10*j, TPB);
   		result.numPoints = 50000;
   		result.numClusters = 10*j;
   		result.tpb = TPB;
         results.push_back(result);
   	}
-    writeToCSV(results, "exp2_2D_par.csv");     //FIXME non crea il file
+	return results;
+}
+
+std::vector<ExperimentResult> secondExperiment(){
+	int it = 10;
+	int j=0;
+	std::vector<ExperimentResult> results;
+	ExperimentResult result = {0};
 
 	for(int i=0;i<it; i++){
 		j=pow(2,i);
-  		result.time = firstExperiment(50000*j, 10);
+  		result.time = kmeans(50000*j, 10, TPB);
   		result.numPoints = 50000*j;
   		result.numClusters = 10;
   		result.tpb = TPB;
         results.push_back(result);
   	}
-    writeToCSV(results, "exp1_2D_par.csv");     //FIXME non crea il file
+	return results;
+}
+
+std::vector<ExperimentResult> thirdExperiment(){
+	int it = 5;
+	int j=0;
+	std::vector<ExperimentResult> results;
+	ExperimentResult result = {0};
+
+	for(int i=0;i<it; i++){
+		j=pow(2,i);
+  		result.time = kmeans(1000000, 10, 32*j);
+  		result.numPoints = 1000000;
+  		result.numClusters = 10;
+  		result.tpb = 32*j;
+        results.push_back(result);
+  	}
+	return results;
+}
+
+int main(){
+
+/*
+	std::vector<ExperimentResult> results = firstExperiment();
+    writeToCSV(results, "exp1_2D_par.csv");
+
+	std::vector<ExperimentResult> results = secondExperiment();
+    writeToCSV(results, "exp2_2D_par.csv");
+*/
+	std::vector<ExperimentResult> results = thirdExperiment();
+    writeToCSV(results, "exp3.csv");
 }
