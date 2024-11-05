@@ -4,13 +4,15 @@
 #include <iostream>
 #include <vector>
 #include <fstream>
+#include <cuda_runtime.h>
+#include <math.h>
 
 #define TPB 512
 #define MAX_ITER 50
 
 __device__ float distance(float x1, float x2)
 {
-	return sqrt((x2-x1)*(x2-x1));
+	return sqrtf((x2-x1)*(x2-x1));
 }
 
 __global__ void kMeansClusterAssignment(int *d_datapoints, int *d_clust_assn, int *d_centroids, int N, int K)
@@ -124,6 +126,12 @@ float firstExperiment(int N, int K)
 	cudaMemcpy(d_clust_sizes,h_clust_sizes,K*sizeof(int),cudaMemcpyHostToDevice);
 
 	int cur_iter = 0;
+    std::cout << "-----------------------------------" << std::endl;
+	for(int c=0;c<K;++c)
+	{
+    	std::cout << "{" << h_centroids[c]  << "}" << std::endl;
+	}
+    std::cout << "-----------------------------------" << std::endl;
 
 	auto start = std::chrono::high_resolution_clock::now();
 
@@ -131,29 +139,24 @@ float firstExperiment(int N, int K)
 	{
 		kMeansClusterAssignment<<<(N+TPB-1)/TPB,TPB>>>(d_datapoints,d_clust_assn,d_centroids, N, K);
 
-		cudaMemcpy(h_centroids,d_centroids,K*sizeof(int),cudaMemcpyDeviceToHost);
-		cudaMemcpy(h_clust_sizes,d_clust_sizes,K*sizeof(int),cudaMemcpyDeviceToHost);
-		cudaMemcpy(h_clust_assn,d_clust_assn,N*sizeof(int),cudaMemcpyDeviceToHost);
-
 		resetCentroids<<<(N+TPB-1)/TPB,TPB>>>(d_centroids, d_clust_sizes,  K);
-
 		accumulateCentroid<<<(N+TPB-1)/TPB,TPB>>>(d_datapoints,d_clust_assn,d_centroids,d_clust_sizes, N, K);
-
-		cudaDeviceSynchronize();
-
 		finalizeCentroids<<<(K + TPB - 1) / TPB, TPB>>>(d_centroids, d_clust_sizes, K);
 
 		cur_iter+=1;
 	}
 
-	for(int c=0;c<N;++c)
+	cudaMemcpy(h_centroids, d_centroids,K*sizeof(int),cudaMemcpyDeviceToHost);
+
+	for(int c=0;c<K;++c)
 	{
-    //std::cout << "{" << h_centroids[c]  << "}" << std::endl;
+    	std::cout << "{" << h_centroids[c]  << "}" << std::endl;
 	}
+    std::cout << "-----------------------------------" << std::endl;
 	cudaDeviceSynchronize();
 	auto end = std::chrono::high_resolution_clock::now();
 	auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-  	std::cout << "Tempo di esecuzione: " << ((float)duration.count())/1000 << " millisecondi" << std::endl;
+  	//std::cout << "Tempo di esecuzione: " << ((float)duration.count())/1000 << " millisecondi" << std::endl;
 
 	cudaFree(d_datapoints);
 	cudaFree(d_clust_assn);
@@ -200,7 +203,7 @@ void writeToCSV(const std::vector<ExperimentResult>& results, const std::string&
 }
 
 int main(){
-	int it = 10;
+	int it = 1;
 	int j=0;
 
 	std::vector<ExperimentResult> results;
@@ -208,9 +211,9 @@ int main(){
 
 	for(int i=0;i<it; i++){
 		j=pow(2,i);
-  		result.time = firstExperiment(500000, 10*j);
-  		result.numPoints = 500000;
-  		result.numClusters = 10*j;
+  		result.time = firstExperiment(500, 2);
+  		result.numPoints = 500;
+  		result.numClusters = 2;
   		result.tpb = TPB;
         results.push_back(result);
   	}

@@ -258,13 +258,15 @@ std::vector<ExperimentResult> thirdExperiment(){
 
 int main(){
 
-/*
+
 	std::vector<ExperimentResult> results = firstExperiment();
     writeToCSV(results, "exp1_2D_par.csv");
-
+/*
 	std::vector<ExperimentResult> results = secondExperiment();
     writeToCSV(results, "exp2_2D_par.csv");
-*/
+
 	std::vector<ExperimentResult> results = thirdExperiment();
     writeToCSV(results, "exp3.csv");
+
+ */
 }
