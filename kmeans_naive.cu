@@ -21,7 +21,7 @@ __global__ void assign_clusters(float *points, float *centroids, int *labels, in
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= n) return;
 
-    float min_dist = FLT_MAX;
+    float min_dist = INFINITY;
     int best_cluster = 0;
     for (int j = 0; j < k; j++) {
         float dist = calculate_distance(&points[idx * dims], &centroids[j * dims], dims);
