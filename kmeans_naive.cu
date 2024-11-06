@@ -3,6 +3,7 @@
 #include <vector>
 #include <cstdlib>
 #include <cmath>
+#include <chrono>
 #include <limits>
 
 #define BLOCK_SIZE 256
