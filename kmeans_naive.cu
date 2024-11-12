@@ -2,11 +2,12 @@
 #include <iostream>
 #include <vector>
 #include <cstdlib>
+#include <fstream>
 #include <cmath>
 #include <chrono>
 #include <limits>
 
-#define BLOCK_SIZE 256
+#define TPB 512
 
 __device__ float calculate_distance(float *a, float *b, int dims) {
     float dist = 0.0;
@@ -74,8 +75,8 @@ void kmeans(float *points, float *centroids, int *labels, int n, int k, int dims
     cudaMemcpy(d_points, points, n * dims * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_centroids, centroids, k * dims * sizeof(float), cudaMemcpyHostToDevice);
 
-    dim3 block(BLOCK_SIZE);
-    dim3 grid((n + BLOCK_SIZE - 1) / BLOCK_SIZE);
+    dim3 block(TPB);
+    dim3 grid((n + TPB - 1) / TPB);
 
     for (int iter = 0; iter < max_iters; iter++) {
         // Assegna ogni punto al cluster più vicino
@@ -95,17 +96,15 @@ void kmeans(float *points, float *centroids, int *labels, int n, int k, int dims
     cudaFree(d_labels);
 }
 
-int main() {
-    int n = 1000000; // numero di punti
-    int k = 10;     // numero di cluster
-    int dims = 2;  // dimensione dello spazio
+float experiment(int n, int k) {
+
+    int dims = 2;  // dimensione
     int max_iters = 100;
 
     std::vector<float> points(n * dims);
     std::vector<float> centroids(k * dims);
     std::vector<int> labels(n);
 
-    // Inizializzazione casuale dei punti e dei centri
     for (int i = 0; i < n * dims; i++) points[i] = static_cast<float>(rand()) / RAND_MAX;
     for (int i = 0; i < k * dims; i++) centroids[i] = static_cast<float>(rand()) / RAND_MAX;
 
@@ -118,4 +117,55 @@ int main() {
 
     std::cout << "K-means terminato.\n";
     return 0;
+}
+
+typedef struct {
+	float time;
+	int numPoints;
+	int numClusters;
+	int tpb;
+}ExperimentResult;
+
+// Funzione per scrivere il vettore di struct in un file CSV
+void writeToCSV(const std::vector<ExperimentResult>& results, const std::string& filename) {
+	// Apri il file in modalità scrittura
+	std::ofstream file;
+	file.open (filename);
+	// Controlla se il file è aperto correttamente
+	if (!file.is_open()) {
+		std::cerr << "Errore nell'aprire il file!" << std::endl;
+		return;
+	}
+
+	// Scrivi l'intestazione del CSV (opzionale)
+	file << "numPoints,numClusters,tpb, time\n";
+
+	// Itera attraverso la lista di risultati e scrivi ogni struct nel CSV
+	for (const auto& result : results) {
+		file << result.numPoints << "," << result.numClusters << "," << result.tpb << "," << result.time << "\n";
+	}
+
+	// Chiudi il file
+	file.close();
+
+	std::cout << "File CSV scritto correttamente." << std::endl;
+}
+
+int main(){
+
+	int it = 10;
+	int j=0;
+
+	std::vector<ExperimentResult> results;
+	ExperimentResult result = {0};
+
+	for(int i=0;i<it; i++){
+		j=pow(2,i);
+  		result.time = experiment(50000*j, 10);
+  		result.numPoints = 50000*j;
+  		result.numClusters = 10;
+  		result.tpb = TPB;
+        results.push_back(result);
+  	}
+    writeToCSV(results, "exp1_par_naive.csv");     //FIXME non crea il file
 }
