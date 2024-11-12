@@ -116,7 +116,7 @@ float experiment(int n, int k) {
     std::cout << "Tempo di esecuzione: " << ((float)duration.count())/1000 << " millisecondi" << std::endl;
 
     std::cout << "K-means terminato.\n";
-    return 0;
+    return ((float)duration.count())/1000;
 }
 
 typedef struct {
