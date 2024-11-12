@@ -144,9 +144,8 @@ float kmeans(int N, int K, int tpb)
 	{
 		kMeansClusterAssignment<<<(N+tpb-1)/tpb,tpb>>>(d_datapoints,d_clust_assn,d_centroids, N, K);
 
-		resetCentroids<<<(N+tpb-1)/tpb,tpb>>>(d_centroids, d_clust_sizes,  K);
+		resetCentroids<<<(K+tpb-1)/tpb,tpb>>>(d_centroids, d_clust_sizes,  K);
 		accumulateCentroid<<<(N+tpb-1)/tpb,tpb>>>(d_datapoints,d_clust_assn,d_centroids,d_clust_sizes, N, K);
-		cudaDeviceSynchronize();
 		finalizeCentroids<<<(K + tpb - 1) / tpb, tpb>>>(d_centroids, d_clust_sizes, K);
 
 		cur_iter+=1;
@@ -213,12 +212,12 @@ std::vector<ExperimentResult> firstExperiment(){
 
 	for(int i=0;i<it; i++){
 		j=pow(2,i);
-  		result.time = kmeans(50000, 10*j, TPB);
-  		result.numPoints = 50000;
-  		result.numClusters = 10*j;
-  		result.tpb = TPB;
-        results.push_back(result);
-  	}
+		result.time = kmeans(50000*j, 10, TPB);
+		result.numPoints = 50000*j;
+		result.numClusters = 10;
+		result.tpb = TPB;
+		results.push_back(result);
+	}
 	return results;
 }
 
@@ -230,9 +229,9 @@ std::vector<ExperimentResult> secondExperiment(){
 
 	for(int i=0;i<it; i++){
 		j=pow(2,i);
-  		result.time = kmeans(50000*j, 10, TPB);
-  		result.numPoints = 50000*j;
-  		result.numClusters = 10;
+  		result.time = kmeans(50000, 10*j, TPB);
+  		result.numPoints = 50000;
+  		result.numClusters = 10*j;
   		result.tpb = TPB;
         results.push_back(result);
   	}
